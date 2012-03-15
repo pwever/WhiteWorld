@@ -1,7 +1,7 @@
 WhiteWorld
 ==========
 
-A simple WebGL application, that fetches elevations data from Google Maps to render a highly abstracted (read simplified) representation of the world.
+A simple WebGL application, that fetches elevations data from Google Maps to render a highly abstracted (read simplified) representation of the world. Partly inspired by clicktorelease.com Blocky Earth experiment.
 
 How-To
 ======
