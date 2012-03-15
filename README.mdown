@@ -1,0 +1,23 @@
+WhiteWorld
+==========
+
+A simple WebGL application, that fetches elevations data from Google Maps to render a highly abstracted (read simplified) representation of the world.
+
+How-To
+======
+
+Pan and zoom the small mini Google Map interface to find the area yo would like to render. Clicking will fetch elevation data for a square area around the mouse position.
+
+One the 3d world appears, you can drag to rotate around it, use the mouse wheel to zoom in and out or use the shift key while zooming to scale the elevation of the rendering.
+
+The elevation is tweaked to work best on the continent level. If you choose a smaller area, you will need to scale up (increase) the elevation map.
+
+Notes
+=====
+
+The water is animating every so slightly, so this will tax your Graphics and/or CPU continuously. Close the window, or switch to a different tab, to avoid this.
+
+Todo
+====
+
+* Allow users to drag out a selection (instead of picking the center). We should then pick a reasonable resoltion based on the aspect ratios the user has choosen.

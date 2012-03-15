@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>WebGL White World</title>
+	<script src="js/jquery-1.7.1.min.js"></script>
+	<script src="js/Three.js"></script>
+	<script src="http://maps.googleapis.com/maps/api/js?key=AIzaSyCjgHXKv27ZiX7WTY9EklnJ-rRTKSU4g54&sensor=false"></script>
+	<script id="vert_shader">
+		varying vec2 vUv;
+		uniform float delta;
+		uniform float scale;
+		uniform float alpha;
+
+		void main()
+		{
+		    vUv = uv;
+		    vec3 p = position;
+		    p.z += sin(2.0 * p.y + delta) * .15;
+		    p.z += cos(2.0 * p.z + delta / 2.0) * .15;
+		    p.z += cos(2.0 * p.x + delta) * .15;
+		    //p.x += sin(p.y + delta / 2.0) * 10.0;
+		    vec4 mvPosition = modelViewMatrix * vec4(scale * p, 1.0 );
+		    gl_Position = projectionMatrix * mvPosition;
+		}
+	</script>
+	<script id="frag_shader">
+		#ifdef GL_ES
+		precision highp float;
+		#endif
+		uniform float delta;
+		uniform float alpha;
+		varying vec2 vUv;        
+
+		void main(void)
+		{
+		    vec2 position = vUv;
+		    float red = 0.2;
+		    float green = 0.3 + sin(delta) * 0.01;
+		    float blue = 0.4 + cos(delta) * 0.01;
+		    vec3 rgb = vec3(red, green, blue);
+		    vec4 color = vec4(rgb, alpha);
+		        gl_FragColor = color;
+		}
+	</script>
+	<script>
+	
+	(function(window,document,undefined) {
+		var debug = true;
+		var webgl;
+		$(document).ready(function(evt) {
+			webgl = (function() { try { return !! window.WebGLRenderingContext && !! document.createElement( 'canvas' ).getContext( 'experimental-webgl' ); } catch( e ) { return false; } } )();
+			
+			if (webgl) {
+				$("#webgl_instructions").hide();
+			} else {
+				return;
+			}
+			PWEVER.GoogleInterface.init({zoom: 1, columns: 20, rows: 20, center: new google.maps.LatLng(34,-118)});
+			PWEVER.ThreeJS.init();
+			
+			var map_options = {
+				zoom:      PWEVER.GoogleInterface.get_zoom(),
+				center:    PWEVER.GoogleInterface.get_center(),
+				mapTypeId: google.maps.MapTypeId.ROADMAP,
+				streetViewControl: false,
+				mapTypeControl: false
+			};
+			var map = new google.maps.Map(document.getElementById('map_canvas'), map_options);
+			google.maps.event.addListener(map, 'zoom_changed', function() {
+			    PWEVER.GoogleInterface.set_zoom(map.getZoom());
+			});
+			google.maps.event.addListener(map, 'click', function(evt) {
+				var grid = PWEVER.GoogleInterface.get_point_array(evt.latLng);
+				PWEVER.GoogleInterface.fetch_elevations(grid, function(results) {
+					// remove previous markers
+					var mcount = PWEVER.markers.length;
+					while (mcount--) {
+						PWEVER.markers[mcount].setMap(null);
+					}
+					PWEVER.markers = new Array();
+					for (var i=0; i<results.length; i++) {
+						var marker = new google.maps.Marker({
+					        position: results[i].location, 
+					        map: map,
+					        title: "" + results[i].elevation
+					    });
+						PWEVER.markers.push(marker);
+					}
+					PWEVER.ThreeJS.construct_surface(results, PWEVER.GoogleInterface.get_columns(), PWEVER.GoogleInterface.get_rows());
+				});
+			});
+			
+		});
+		
+		var PWEVER = PWEVER || {};
+		PWEVER.markers = [];
+		PWEVER.GoogleInterface = new function() {
+			var center, zoom, columns, rows, ll_inc;
+			var elevation_service;
+				
+			this.init = function(options) {
+				zoom    = options['zoom']    || 4;
+				columns = options['columns'] || 5;
+				rows    = options['rows']    || 5;
+				center  = options['center']  || new google.maps.LatLng( 34,-118 );
+				// calculate lat/lng increments based on the zoom level:
+				this.set_zoom(zoom);
+		
+				elevation_service = new google.maps.ElevationService();
+			};
+		
+			this.get_point_array = function(center_position) {
+				var locations = [];
+				for( var row=-.5*rows; row<.5*rows; row++ ) {
+					for( var col=-.5*columns; col<.5*columns; col++ ) {
+						var tp = new google.maps.LatLng(
+							center_position.lat() - row * ll_inc,
+							center_position.lng() + col * ll_inc
+						);
+						locations.push(tp);
+					}
+				}
+				return locations;
+			};
+		
+			this.fetch_elevations = function(locations, callback) {
+				// TODO: We need to check whether or not the request doesn't exceed allowed URL request length
+				altitudes = [];
+					
+				(function fetch_from_google() {
+					if (locations.length) {
+						// get a set of x locations
+						var set = locations.splice(0,150);
+						elevation_service.getElevationForLocations( {'locations':set}, function(results, status) {
+							if (status == google.maps.ElevationStatus.OK) {
+								altitudes = altitudes.concat(results);
+							} else {
+								console.log( 'Elevation for location error: ' + status );
+							}
+							console.log(locations.length + " results left to fetch.");
+							fetch_from_google();
+							//setTimeout(function() {fetch_from_google()}, 500);
+						});
+							
+					} else {
+						// call the callback function
+						callback(altitudes);
+					}
+				})();
+			};
+				
+			this.get_center = function() {
+				return center;
+			};
+			this.get_zoom = function() {
+				return zoom;
+			};
+			this.set_zoom = function(z) {
+				console.log(z);
+				zoom = Math.max(0,z);
+				ll_inc = 4; for (var i=zoom-1; i>0; i--) { ll_inc /= 2; }
+			}
+			this.get_columns = function() {
+				return columns;
+			};
+			this.get_rows = function() {
+				return rows;
+			}
+		
+			// Utilities
+			this.degreesToRadians = function(deg) {
+				return deg * (Math.PI / 180);
+			};
+			this.radiansToDegrees = function(rad) {
+				return rad / (Math.PI / 180);
+			};
+		};
+		PWEVER.ThreeJS = new function() {
+			var uniforms;
+			var renderer, scene, camera, controls, light, water, plane;
+			var half_width = window.innerWidth / 2, half_height = window.innerHeight / 2;
+		
+			this.init = function() {
+				// stop the text cursor
+				document.onselectstart = function() { return false; };
+			
+				// Shaders
+				//these should reference their respective shaders
+				var vert_shader = document.getElementById('vert_shader').innerHTML;
+				var frag_shader = document.getElementById('frag_shader').innerHTML;
+				var attributes = {};
+				uniforms = {
+				  delta: {type: 'f', value: 0.0},
+				  scale: {type: 'f', value: 1.0},
+				  alpha: {type: 'f', value: 1.0}
+				};
+
+				var special_material = new THREE.ShaderMaterial({
+				  uniforms: uniforms,
+				  attributes: attributes,
+				  vertexShader: vert_shader,
+				  fragmentShader: frag_shader,
+				  opacity: 0.5,
+				  transparent: true
+				});
+					
+					
+				// Renderer
+				renderer = new THREE.WebGLRenderer({antialias: true, preserveDrawingBuffer: false});
+				renderer.shadowMapEnabled = false;
+				renderer.setClearColorHex(0x001122, 1.0);
+				renderer.clear();
+				renderer.setSize(half_width*2, half_height*2);
+				$("#webgl_canvas").append(renderer.domElement);
+		
+				// Scene
+		        scene = new THREE.Scene();
+				scene.fog = new THREE.Fog(0x050505, 100, 400);
+				scene.fog.color.setRGB(60/255, 120/255, 200/255);
+			
+				// Camera
+				var perspective = 40;
+				var aspect_ratio = half_width / half_height;
+				var near = 1, far = 10000;
+		        camera = new THREE.PerspectiveCamera(perspective, aspect_ratio, near, far );
+				//camera = new THREE.OrthographicCamera( -half_width, half_width, half_height, -half_height, near, far );
+				camera.position = new THREE.Vector3(0, -200, 200);
+				scene.add(camera);
+					
+				controls = new THREE.TrackballControls(camera, renderer.domElement);
+				controls.target.set( 0, 0, 0 );
+				controls.rotateSpeed = .2;
+				controls.zoomSpeed = 1.2;
+				controls.panSpeed = 0.8;
+				controls.noZoom = false;
+				controls.noPan = false;
+				controls.staticMoving = false;
+				controls.dynamicDampingFactor = 0.15;
+				controls.keys = [ 65, 83, 68 ];
+					
+				// Spot Light
+				light = new THREE.SpotLight();
+				light.position.set(200, 200, 120);
+				scene.add(light);
+					
+				// Ambient light
+				//var al = new THREE.AmbientLight(0x336699);
+				var al;
+				//al = new THREE.PointLight(0x99CCFF, 1);
+				//al.position = new THREE.Vector3(400,400,400);
+				//scene.add(al);
+					
+				al = new THREE.SpotLight(0xFFFFFF, 1);
+				al.position = new THREE.Vector3(-200,-200,200);
+				scene.add(al);
+					
+				// Water
+				var water_material = new THREE.MeshBasicMaterial({color:0x336699, opacity:0.5});
+				water = new THREE.Mesh(new THREE.PlaneGeometry(299,299,100,100),special_material);
+				water.doubleSided = true;
+				water.overdrawn = false;
+				scene.add(water);
+					
+				animate();
+					
+				// Setup mouse events
+				$(renderer.domElement).bind("mousedown", PWEVER.ThreeJS.mouse_down);
+				$(renderer.domElement).bind("mouseup mouseout", PWEVER.ThreeJS.mouse_up);
+				$(renderer.domElement).bind("mousewheel", PWEVER.ThreeJS.mouse_wheel);
+			}
+				
+			this.construct_surface = function(points, columns, rows) {
+				if (plane) scene.remove(plane);
+					
+				var plane_geom = new THREE.PlaneGeometry(300,300,columns-1,rows-1);
+				var i = points.length;
+				var max_depth = 0;
+				while(--i>=0) {
+					plane_geom.vertices[i].position.z = points[i].elevation * 0.01;
+					if (points[i].elevation < max_depth) max_depth = points[i].elevation;
+				}
+				max_depth = max_depth*0.01;
+				//water.scale.z = Math.abs(max_depth);
+				//water.position.z = -water.scale.z/2+1;
+					
+				var mesh_options = {
+					wireframe: false,
+					shading: THREE.FlatShading,
+					overdraw: true,
+					color: 0xFFFFFF
+				};
+				var plane_mate = new THREE.MeshLambertMaterial(mesh_options);
+				plane = new THREE.Mesh(plane_geom, plane_mate);
+				plane.doubleSided = true;
+				plane.overdrawn = false;
+				plane.position.set(0,0,0);
+					
+				scene.add(plane);
+					
+				var geom, wall;
+				// front siding
+				geom = get_siding_geom(plane_geom.vertices.slice(-columns), max_depth);
+				wall = new THREE.Mesh(geom, plane_mate);
+				wall.doubleSided = true;
+				plane.add(wall);
+					
+				// back siding
+				geom = get_siding_geom(plane_geom.vertices.slice(0,columns), max_depth);
+				wall = new THREE.Mesh(geom, plane_mate);
+				wall.doubleSided = true;
+				plane.add(wall);
+					
+				var left = [], right = [];
+				//sides
+				for (var i=0; i<plane_geom.vertices.length; i+=columns) {
+					left.push(plane_geom.vertices[i]);
+					right.push(plane_geom.vertices[i+columns-1]);
+				}
+				geom = get_siding_geom(left, max_depth);
+				wall = new THREE.Mesh(geom, plane_mate);
+				wall.doubleSided = true;
+				plane.add(wall);
+					
+				geom = get_siding_geom(right, max_depth);
+				wall = new THREE.Mesh(geom, plane_mate);
+				wall.doubleSided = true;
+				plane.add(wall);
+					
+				// bottom
+				geom = new THREE.PlaneGeometry(300,300,0,0);
+				wall = new THREE.Mesh(geom, plane_mate);
+				wall.position.z = max_depth;
+				wall.doubleSided = true;
+				plane.add(wall);
+					
+				//render();
+			};
+				
+			function get_siding_geom(vertices, max_depth) {
+				var geom = new THREE.Geometry();
+				var i = vertices.length;
+				while(--i>=0) {
+					var v = vertices[i];
+					geom.vertices.push(new THREE.Vertex(new THREE.Vector3(v.position.x, v.position.y, v.position.z)));
+					geom.vertices.push(new THREE.Vertex(new THREE.Vector3(v.position.x, v.position.y, max_depth)));
+				}
+				var face = geom.vertices.length-2;
+				while(--face>=0) {
+					geom.faces.push(new THREE.Face3(face, face+1, face+2));
+				}
+				geom.computeFaceNormals();
+				return geom;
+			}
+				
+			var last_mouse_point;
+			this.mouse_down = function(evt) {
+				last_mouse_point = new THREE.Vector2(evt.offsetX, evt.offsetY);
+					
+				$(this).bind("mousemove", PWEVER.ThreeJS.mouse_move);
+			};
+			this.mouse_move = function(evt) {
+				//render();
+			}
+			this.mouse_up = function(evt) {
+				$(this).unbind("mousemove", this.mouse_move);
+			};
+				
+			this.mouse_wheel = function(evt) {
+				var factor = 1 - evt.originalEvent.wheelDelta * 0.001;
+				if (evt.shiftKey) {
+					plane.scale.z *= factor;
+				} else {
+					camera.position.multiplyScalar(factor);
+				}
+			};
+				
+			function animate() {
+				requestAnimationFrame( animate );
+				render();
+			}
+				
+			function render() {
+				var cam_dist = camera.position.length();
+				scene.fog.near = cam_dist - 200;
+				scene.fog.far  = cam_dist + 200;
+					
+				uniforms.delta.value += 0.1;
+				uniforms.alpha.value = 0.7 + Math.sin(uniforms.delta.value) * 0.1;
+				controls.update();
+				renderer.render(scene, camera);
+			}
+				
+		};
+		
+	})(window,document);
+	
+	</script>
+	<style type="text/css" media="screen">
+	html, body {
+	  height: 100%;
+	  margin: 0;
+	  padding: 0;
+	  font-family: "Nokia Pure Text", Helvetica, Arial, sans-serif;
+	  font-weight: 100;
+	}
+
+	#map_canvas {
+	  height: 200px;
+	  width: 300px;
+	  position:absolute;
+		top: 20px;
+		left: 20px;
+	  z-index: 1000;
+	}
+	#webgl_canvas {
+	  height: 100%;
+	  width: 100%;
+	  background-color: white;
+  	}
+	#webgl_instructions {
+		position: absolute;
+		width: 100%;
+		top: 0;
+		left: 0;
+		z-index: 1000;
+	}
+	#webgl_instructions div.container {
+		width: 30em;
+		margin: 2em auto;
+	}
+	#webgl_instructions ul {
+		list-style:none;
+		padding: 0;
+		margin: 0;
+	}
+	#webgl_instructions ul li {
+		border-top: 1px solid #999;
+		margin-top: 1em;
+	}
+	#webgl_instructions img {
+		max-width: 100%;
+	}
+	</style>
+</head>
+<body>
+	<div id="debug"></div>
+	<div id="map_canvas"></div>
+	<div id="webgl_canvas"></div>
+	<div id="webgl_instructions"><div class="container">
+		<p>This experiment requires WebGL. WebGL is available on current versions of <a href="https://www.google.com/chrome/" target="_blank">Chrome</a>, <a href="http://www.mozilla.org/" target="_blank">Firefox</a> and <a href="http://www.apple.com/safari/" target="_blank">Safari</a> (Mac version only). In Safari, you need to manually enable it. Please follow the steps below.</p>
+		<h3>Safari</h3>
+		<ul>
+			<li>Open the preferences. <img src="images/Safari-Menu.png" /></li>
+			<li>Enable debug menu on the advanced tab. <img src="images/Safari-Preferences-Advanced.png" /></li>
+			<li>Check "Enable WebGL" in the Debug menu. <img src="images/Safari-DebugMenu.png" /></li>
+		</ul>
+	</div></div>
+</body>
+</html>
